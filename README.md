@@ -1,2 +1,2 @@
 # video_game_projects
-A repository for video game project highlights for ECE 4525
+This is a website to showcase video game project highlights of ECE 4525 class at Virginia tech
