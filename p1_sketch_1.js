@@ -2,7 +2,7 @@
 For my project I implemented everything in the project description and added a few features. Because there are 4 letters in my name I made 3 different difficulties. On Easy mode, only the "LU" letters would be in play. Medium "LUK" letters would be in play and Hard all 4 letters "LUKE" would be in play. I also added a play again button when you win or lose that takes you back to the main menu
 */
 
-/*
+/* DiSalvo, Luke
 This is the Block class in which my name is spelt out of.
 It is a simple rectangle with a width and height of 15.
 The function takes in an x-coordinate, a y-coordinate and a newY-coordinate where the block "falls" to.
