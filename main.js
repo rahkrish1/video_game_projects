@@ -9,12 +9,19 @@ var project_id_loc = {
 	'logo1', 
 	'logo2',
 	'logo3',
+	'p1_game1',
+	'p1_game2',
+	'p1_game3'
 	
 	],
 'loc':[
 	'p0_sketch_1.js', 
 	'p0_sketch_2.js',
 	'p0_sketch_3.js',
+	
+	'p1_sketch_1.js',
+	'p1_sketch_2.js',
+	'p1_sketch_3.js'
 	
 ],
 'description':['Empty'] 
