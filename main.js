@@ -17,8 +17,7 @@ var project_id_loc = {
 'loc':[
 	'p0_sketch_1.js', 
 	'p0_sketch_2.js',
-	'p0_sketch_3.js',
-	
+	'p0_sketch_3.js',	
 	'p1_sketch_1.js',
 	'p1_sketch_2.js',
 	'p1_sketch_3.js'
