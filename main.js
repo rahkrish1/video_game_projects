@@ -11,7 +11,10 @@ var project_id_loc = {
 	'logo3',
 	'p1_game1',
 	'p1_game2',
-	'p1_game3'
+	'p1_game3',
+	'p2_game1',
+	'p2_game2',
+	'p2_game3'
 	
 	],
 'loc':[
@@ -20,7 +23,10 @@ var project_id_loc = {
 	'p0_sketch_3.js',
 	'p1_sketch_1.js',
 	'p1_sketch_2.js',
-	'p1_sketch_3.js'
+	'p1_sketch_3.js',
+	'p2_sketch_1.js',
+	'p2_sketch_2.js',
+	'p2_sketch_3.js'
 	
 	
 ],
