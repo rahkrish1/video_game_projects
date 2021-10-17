@@ -20,7 +20,9 @@ var project_id_loc = {
 	'p4_game1',
 	'p4_game2',
 	'p4_game3',
-	'p4_game4'
+	'p4_game4',
+	'p5_game1',
+	'p5_game2'
 	
 	
 	
@@ -41,7 +43,9 @@ var project_id_loc = {
 	'p4_sketch_1.js',
 	'p4_sketch_2.js',
 	'p4_sketch_3.js',
-	'p4_sketch_4.js'
+	'p4_sketch_4.js',
+	'p5_sketch_1.js',
+	'p5_sketch_2.js'
 	
 	
 ],
