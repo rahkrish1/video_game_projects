@@ -1,804 +1,1544 @@
-class particleObj{ // Particle Object to create the particles for fire
-  constructor(x, y){
-    this.x = x;
-    this.y = y;
-    this.alpha = 255;
-    this.r = 226;
-    this.g = 88;
-    this.b = 34;
-    this.vx = random(-1, 1);
-    this.vy = random(-5, -1);
-    
+/*
+  Matthew Salerno
+  ECE 4525
+  Project 3
+  Untitled Space Game
+  
+  This is a simple game which builds off of my "game engine" from untitled bee game.
+  
+  As a Hokie, I will conduct myself with honor and integrity at all times.
+  I will not lie, cheat, or steal, nor will I accept the actions of those who do.
+  - Matthew Salerno
+*/
+// image locations
+const PLAYER               = [0,0];
+const ENEMY                = [0,1];
+const DEAD                 = [0,2];
+const WALL_CORNER_CONVEX   = [2,1];
+const WALL_CORNER_CONCAVE  = [1,1];
+const WALL_SIDE_HORIZONTAL = [1,0];
+const WALL_SIDE_VERTICAL   = [2,0];
+const EMPTY                = [1,2];
+
+const TOP_LEFT     = 0;
+const TOP_RIGHT    = 1;
+const BOTTOM_LEFT  = 2;
+const BOTTOM_RIGHT = 3;
+
+// movement constants
+const LEFT_RIGHT = 0;
+const UP_DOWN    = 1;
+const KEY_W      = 87;
+const KEY_A      = 65;
+const KEY_S      = 83;
+const KEY_D      = 68;
+const KEY_H      = 72;
+const KEY_M      = 77;
+const KEY_SPACE  = 32;
+
+// collision constants
+const MAX_COLLISION_LOOPS = 16;
+
+// game state
+const SPRITES = 0;
+const MENU    = 1;
+const RUNNING = 2;
+const LOST    = 3;
+const WON     = 4;
+
+const IN_AIR    = 0;
+const ON_GROUND = 1;
+
+// debug
+var VISUALIZE_COLLISIONS  = false;
+const PAUSE_FOR_SPRITESHEET = false;
+var DRAW_HITBOX           = false;
+
+// globals to handle input and macro-game-state
+// outside of game world because keyPresses are
+// global and may happen when game world doesn't exist
+var DIR_INPUT = [0,0]; // Directional keys being pressed. Opposite keys add to zero
+var PREFERRED_AXIS = 0 // In case of no diagonal movement in game, we favor the most recent key press
+var MOUSE_WAS_PRESSED = false; // we don't want if the mouse is pressed, just if it was since the last time this var was cleared.
+var SPACE_WAS_PRESSED = false; // same as above
+function mousePressed() {
+  MOUSE_WAS_PRESSED = true;
+}
+
+function vec_array(points) {
+  arr = [];
+  for (let i = 0; i < points.length; i+=2){
+    arr.push(createVector(points[i], points[i+1]))
   }
-  draw(){
-     noStroke(); // drawing the particles with no stroke
-    fill(this.r, this.g, this.b, this.alpha); // Color of fire
-    ellipse(this.x, this.y, 4, 6); // draw the particle
+  return arr;
+}
+
+function clamp(_min, _mid, _max) {
+  let ret = _mid;
+  if (ret < _min) {
+    return _min;
   }
-  update(){ // updating the position of the particle
-    this.x += this.vx;
-    this.y += this.vy;
-    this.alpha -= 25;
+  else if (ret > _max) {
+    return _max;
   }
-  done(){ // checking if the particles transparency is negative or not
-    if(this.alpha <0){
-      return true
+  else {
+    return _mid;
+  }
+}
+
+function towards_number(amount, target, step) {
+  let delta = 0;
+  if (amount < target) {
+    delta = min(target-amount, step);
+  }
+  else if (amount > target){
+    delta = max(target-amount, -step);
+  }
+  return amount+delta;
+}
+
+function keyPressed() {
+  switch(keyCode) {
+    case UP_ARROW:
+    case KEY_W:
+      PREFERRED_AXIS = UP_DOWN;
+      DIR_INPUT[1] += 1;
+      break;
+    case DOWN_ARROW:
+    case KEY_S:
+      PREFERRED_AXIS = UP_DOWN;
+      DIR_INPUT[1] -= 1;
+      break;
+    case LEFT_ARROW:
+    case KEY_A:
+      PREFERRED_AXIS = LEFT_RIGHT;
+      DIR_INPUT[0] -= 1;
+      break;
+    case RIGHT_ARROW:
+    case KEY_D:
+      PREFERRED_AXIS = LEFT_RIGHT;
+      DIR_INPUT[0] += 1;
+      break;
+    case KEY_SPACE:
+      SPACE_WAS_PRESSED = true;
+      break;
+    case KEY_H:
+      DRAW_HITBOX = !DRAW_HITBOX;
+      break;
+    case KEY_M:
+      VISUALIZE_COLLISIONS = !VISUALIZE_COLLISIONS;
+      break;
+  }
+}
+function keyReleased() {
+  switch(keyCode) {
+        case UP_ARROW:
+    case KEY_W:
+      DIR_INPUT[1] -= 1;
+      break;
+    case DOWN_ARROW:
+    case KEY_S:
+      DIR_INPUT[1] += 1;
+      break;
+    case LEFT_ARROW:
+    case KEY_A:
+      DIR_INPUT[0] += 1;
+      break;
+    case RIGHT_ARROW:
+    case KEY_D:
+      DIR_INPUT[0] -= 1;
+      break;
+  }
+}
+
+/*
+  These are classes I hope to be able to reuse in future games.
+*/
+
+class node {
+  constructor(parent) {
+    // register as child
+    this.children = new Set();
+    this.parent = parent;
+    this.world = this.getWorld();
+    if (this.parent instanceof node) {
+      this.parent.addChild(this);
+    }
+    // setup hooks
+    if (typeof this.__process == "function") {
+      //print(typeof this.__process);
+      this.world.processCalls.add(this);
+    }
+    if (typeof this.__draw == "function") {
+      //print(typeof this.__draw);
+      this.world.drawCalls.add(this);
+    }
+  }
+
+  addChild(child) {
+    this.children.add(child);
+  }
+  
+  remove() {
+    this.children.forEach(function(child, index) {
+      child.remove();
+    });
+    console.assert(this.children.size == 0, "FAILED TO DELETE CHILDREN WHEN REMOVING");
+    if (this.world.drawCalls.has(this)) {
+      this.world.drawCalls.delete(this);
+    }
+    if (this.world.processCalls.has(this)) {
+      this.world.processCalls.delete(this);
+    }
+    this.parent.children.delete(this);
+  }
+  
+  hasInstance(instance) {
+    for (let child of this.children) {
+      if (child instanceof instance) {
+        return child;
+      }
+    }
+    return false;
+  }
+  
+  getWorld() {
+    console.assert(this.parent instanceof node, "Root is not a node!");
+    return this.parent.getWorld();
+  }
+}
+
+class world extends node {
+  constructor() {
+    super(null);
+    this.drawCalls = new Set();
+    this.processCalls = new Set();
+    this.collision_array = [];
+    this.collision_division = createVector(8,8);
+    this.world_size = createVector(400,400);
+    this.chunk_size = createVector(this.world_size.x/this.collision_division.x, 
+                                   this.world_size.y/this.collision_division.y);
+    for (let i = 0; i < this.collision_division.x; i++) {
+      this.collision_array[i] = [];
+      for (let j = 0; j < this.collision_division.y; j++) {
+        this.collision_array[i][j] = new Set();
+      }
+    }
+  }
+  
+  getWorld() {
+    return this;
+  }
+  
+  process() {
+    this.processCalls.forEach(function(caller, index) {
+      caller.__process();
+    });
+  }
+  
+  draw() {
+    this.drawCalls.forEach(function(caller, index) {
+      caller.__draw();
+    });
+    if (VISUALIZE_COLLISIONS) {
+      for (let i = 0; i < this.collision_division.x; i++) {
+        for (let j = 0; j < this.collision_division.y; j++) {
+          if (this.collision_array[i][j].size > 0) {
+            noStroke();
+            fill(255,0,0, 128);
+            rect(i*this.chunk_size.x, j*this.chunk_size.y, this.chunk_size.x, this.chunk_size.y);
+            stroke(0,0,0,128);
+            fill(256,256,256,128);
+            textSize(32);
+            textAlign(CENTER, CENTER);
+            text(this.collision_array[i][j].size, (i+0.5)*this.chunk_size.x, (j+0.5)*this.chunk_size.y);
+          }
+
+        }
+      }
+    }
+  }
+  
+  registerCollider(id, pos) {
+    this.collision_array[pos.x][pos.y].add(id);
+  }
+  unregisterCollider(id, pos) {
+    if(this.collision_array[pos.x][pos.y].delete(id)) {
+      //print("Couldn't find collider!");
+    }
+  }
+  get_collider_array_pos(pos) {
+    return createVector(floor(pos.x/this.world.chunk_size.x),
+      floor(pos.y/this.world.chunk_size.y)
+    );
+  }
+  
+  // calls a function func(object_id: ent) on all objects within square radius "radius" of array_pos. "this" can be passed in at the end as well.
+  forNearby(array_pos, func, radius=1, thisArg = null) {
+    let maxi = Math.min(this.collision_division.x-radius,array_pos.x+radius);
+    let maxj = Math.min(this.collision_division.y-radius,array_pos.y+radius);
+    let mini = Math.max(0, array_pos.x-radius);
+    let minj = Math.max(0,array_pos.y-radius);
+    for (let i = mini; i <= maxi; i++) {
+      for (let j = minj; j <= maxj; j++) {
+        for (const ent of this.collision_array[i][j]) {
+          func.call(thisArg, ent);
+        }
+      }
+    }
+  }
+  forLine(array_pos1, array_pos2, func, width=0, thisArg = null) {
+    let cells = new Set();
+    let diff = p5.Vector.sub(array_pos1, array_pos2);
+    let length = diff.mag();
+    let step = 1/length;
+    for (let i = 0; i <= 1; i+=step) {
+      let cell = p5.Vector.lerp(array_pos1, array_pos2, i);
+      cell.x = round(cell.x);
+      cell.y = round(cell.y);
+      this.forNearby(cell, function(item) {
+        cells.add(item);
+      }, width, thisArg);
+    }
+    cells.forEach(func, thisArg);
+  }
+}
+
+class entity_2d extends node {
+  constructor(parent, position, direction) {
+    super(parent);
+    this.position = position;
+    this.direction = direction;
+  }
+}
+
+class emitter extends node {
+  // oneshot becomes should be the number of particles to emit if not false
+  constructor(parent, particle, vel, vel_dev, life_max, life_min, emit_max, emit_min, emit_delta, oneshot=false, offset=createVector(0,0)) {
+    super(parent);
+    this.enabled = true;
+    this.oneshot = oneshot;
+    this.num_particles = 0;
+    this.particle = particle;
+    this.vel = vel;
+    this.vel_dev = vel_dev;
+    this.life_max = life_max;
+    this.life_min = life_min;
+
+    this.emit_max = emit_max;
+    this.emit_min = emit_min;
+    this.emit_delta = emit_delta;
+    this.offset = offset;
+    this.counter = 0;
+  }
+  enable() {
+    this.enabled = true;
+  }
+  disable() {
+    this.enabled = false;
+  }
+  toggle() {
+    this.enabled = !this.enabled;
+  }
+  get position(){
+    let pos = createVector(0,0);
+    if (this.parent instanceof entity_2d) {
+      pos = this.parent.position.copy().add(this.offset.copy().rotate(this.parent.direction));
     }
     else {
-      return false;
+      pos = this.offset.copy();
+    }
+    return pos;
+  }
+  __process() {
+    if (this.enabled && this.position.x > 0 && this.position.y > 0 && this.position.x < this.world.level_width && this.position.y < this.world.level_height){
+      if (this.counter == 0) {
+        let num = round(random(this.emit_min, this.emit_max));
+
+        for (let _ = 0; _ < num; _++) {
+          new this.particle(this.world, 
+                            this.position, 
+                            this.vel.copy().add(p5.Vector.fromAngle(random(0, TWO_PI), random(0, this.vel_dev))), 
+                            random(this.life_min, this.life_max));
+        }
+        if (this.oneshot > 0) {
+          this.num_particles+=num;
+          if (this.num_particles > this.oneshot) {
+            this.remove();
+          }
+        }
+      }
+      this.counter = (this.counter+1)%this.emit_delta;
     }
   }
 }
-// The explosion object and the Firewrok Obj is taken from the class examples. and has been displayed to display a firework when the player or any enemy tank is destroyed. 
-class explosionObj {
-  constructor(a) {
-    this.position = new p5.Vector(0, 0);
-    this.direction = new p5.Vector(0, 0);
-    this.size = random(1, 3);
-    this.c1 = 136;
-    this.c2 = 8;
-    this.c3 = 8;
-    if (a === 0) {
-      this.c1 = random(0, 250);
-    } else {
-      this.c1 = random(100, 255);
-    }
-    if (a === 1) {
-      this.c2 = random(0, 250);
-    } else {
-      this.c2 = random(100, 255);
-    }
-    if (a === 2) {
-      this.c3 = random(0, 250);
-    } else {
-      this.c3 = random(100, 255);
-    }
-    this.timer = 0;
-  }
-  draw() {
-    fill(this.c1, this.c2, this.c3, this.timer); 
-    noStroke();
-    ellipse(this.position.x, this.position.y, this.size, this.size);
 
-    this.position.x += this.direction.y * cos(this.direction.x);
-    this.position.y += this.direction.y * sin(this.direction.x);
-    this.position.y += 90 / (this.timer + 100);
-    this.timer--;
+class particle_2d extends node {
+  constructor(parent, position, velocity, life) {
+    super(parent);
+    this.position = position;
+    this.velocity = velocity;
+    this.life = life;
+  }
+  __process() {
+    this.position.add(this.velocity);
+    if (this.life <= 0) {
+      this.remove();
+    }
+    this.life--;
   }
 }
 
-class fireworkObj {
-  constructor(a) {
-    this.position = new p5.Vector(200, 380);
-    this.direction = new p5.Vector(0, 0);
-    this.target = new p5.Vector(mouseX, mouseY);
-    this.step = 0;
-    this.explosions = [];
-    for (var i = 0; i < 100; i++) { //cheanged the number of particles to 100
-      this.explosions.push(new explosionObj(a));
-    }
-  }
-  draw() {
-    fill(255, 255, 255);
-    ellipse(this.position.x, this.position.y, 2, 2);
-
-    this.position.add(this.direction);
-    if (
-      dist(this.position.x, this.position.y, this.target.x, this.target.y) < 4
-    ) {
-      this.step = 2;
-      for (var i = 0; i < this.explosions.length; i++) {
-        this.explosions[i].position.set(this.target.x, this.target.y);
-
-        this.explosions[i].direction.set(random(0, 2 * PI), random(-0.3, 0.3));
-        this.explosions[i].timer = 100; // explosion timer is now set to 100
-      }
-    }
-  }
-} 
-var score = 0; // keeping the score of the player to check the winning condition
-var walls = []; // storing all the walls 
-var player = []; // storing the player
-var enemy = []; // storing the enemy objects
-var tileMap = [
-  "wwwwwwwwwwwwwwwwwwww",
-  "w                  w",
-  "w  P               w",
-  "w                  w",
-  "w                  w",
-  "w                  w",
-  "w               e  w",
-  "w                  w",
-  "w                  w",
-  "w                  w",
-  "w   e              w",
-  "w                  w",
-  "w                  w",
-  "w                  w",
-  "w  e            e  w",
-  "w                  w",
-  "w                  w",
-  "w     e            w",
-  "w                  w",
-  "wwwwwwwwwwwwwwwwwwww",
-]; // TileMap initialized
-
-var currFrameCount = 0;
-var bulletIndex = 0; // variable holds the index of the bullet shot
-
-// Code snippet used is from one of the examples presented in the class.
-// The code has been modified to fit the purpose of this program and project
-function checkFire() {
-  if (keyIsDown(32)) {
-    if (currFrameCount < frameCount - 10) {
-      currFrameCount = frameCount;
-      bullets[bulletIndex].fired = true;
-      bullets[bulletIndex].x = player[0].x;
-      bullets[bulletIndex].y = player[0].y;
-      bullets[bulletIndex].angle = player[0].angle - HALF_PI;
-      bullets[bulletIndex].blocked = false;
-
-      bulletIndex++;
-      if (bulletIndex > 3) {
-        bulletIndex = 0;
-      }
-    }
+class bullet_trail_blue extends particle_2d {
+  __draw(){
+    fill(128,128,255);
+    strokeWeight(2);
+    stroke(128,128,255,128)
+    circle(this.position.x, this.position.y, 3);
   }
 }
-function initTilemap() { 
 
-
-  // Creating and pushing the objects of the tilemap in the
-  stroke(0);
-  var enemyIndex = 0;
-  for (var i = 0; i < tileMap.length; i++) {
-    for (var j = 0; j < tileMap[i].length; j++) {
-      // for the entire length and the width of the tileMap
-      switch (
-        tileMap[i][j] // check the characters and create and push the objects respectively.
-      ) {
-        case "w": // w is a wall
-          // fill(145, 111, 78);
-          walls.push(new wallObj(j * 20, i * 20));
-          break;
-        case "P": // P - player
-          player.push(new playerObj(j * 20, i * 20));
-          break;
-        case "e": // enemy tanks
-          enemy.push(new enemyObj(j * 20, i * 20, enemyIndex));
-          enemyIndex += 1;
-          break;
-      }
-    }
+class bullet_trail_red extends particle_2d {
+  __draw(){
+    fill(255,128,128);
+    strokeWeight(2);
+    stroke(255,128,128,128)
+    circle(this.position.x, this.position.y, 3);
   }
 }
-class bulletObj {
-  constructor(x, y, angle) {
-    this.x = x;
-    this.y = y;
-    this.fired = false;
-    this.vec = createVector(1, 1); // creating a vector to shoot the bullet in a  given direction
-    this.angle = angle;
-    this.blocked = false;
-  }
-  draw() {
-    var wallCollision = false; // variable checks for wall collision
-    var adversaryCollision = false; // variable checks for enemy collision
-    push(); // droawing and translating the bullets
-    translate(this.x, this.y);
-    fill(0, 0, 0);
-    ellipse(0, 0, 6, 6);
-    this.vec.setMag(2);
-    this.vec.setHeading(this.angle + HALF_PI);
-    this.x += this.vec.x;
-    this.y += this.vec.y;
-    pop();
-    for (var i = 0; i < walls.length; i++) {
-      // checking for collision with the walls
-      if (walls[i].checkCollisionB(this.x, this.y)) {
-        this.blocked = true; // checks if the bullet has been blocked or not
-        wallCollision = true;
-      }
-    }
-    if (this.blocked) {
-      this.fired = false;
-      if (wallCollision) {
-        return false;
-      } else if (adversaryCollision) {
-        return true;
-      }
-    }
-  }
-  los(x, y, ind) { //checking if a bullet is in an enemy's line of sight
-    var projectiony = 0; // projected y position of the bullet
 
-    var projectionx = 0; // projected x position of the bullet 
-    if (this.fired) { // Check for los only if the bullet is fired
-      projectiony = tan(this.angle + HALF_PI) * (x - this.x) + this.y; // get the projected y location using y = mx +c
-      projectionx = (y - this.y) / tan(this.angle + HALF_PI) + this.x; // get the projected x location using x = (y-c)/m
-      if (dist(x, y, projectionx, projectiony) < 90) { // if the distance between the projected coordinates and the actual coordinates is less than 90, then the bullet is in sight
-        return true;
-      } else {
+
+class intersection {
+  // Note, assumes only one point intersects
+  constructor(shape, pln, pnt) {
+    this.shape=shape;
+    this.plane=pln.copy();
+    this.point=pnt.copy(); 
+  }
+}
+// must be defined clockwise
+class convex_shape {
+  constructor(points) {
+    this.points = points;
+    this.normals = [];
+    for (let i = 0; i < points.length; i++) {
+      let i_next = (i+1)%points.length;
+      let orig = p5.Vector.lerp(points[i], points[i_next], 0.5);
+      let norm = p5.Vector.sub(points[i_next], points[i]).rotate(-HALF_PI).normalize();
+      this.normals.push(new plane_2d(orig, norm));
+    }
+    console.assert(this.points.length > 0, "convex shape with no points!");
+    console.assert(this.normals.length > 0, "convex shape with no normals!");
+  }
+  translate(vec) {
+    for (let i = 0; i < this.points.length; i++) {
+      this.points[i].add(vec);
+    }
+    for (let i = 0; i < this.normals.length; i++) {
+      this.normals[i].origin.add(vec);
+    }
+  }
+  rotate(rad) {
+    for (let i = 0; i < this.points.length; i++) {
+      this.points[i].rotate(rad);
+    }
+    for (let i = 0; i < this.normals.length; i++) {
+      this.normals[i].origin.rotate(rad);
+      this.normals[i].normal.rotate(rad);
+    }
+  }
+  intersect_shape(shape) {
+    for (let pnt of shape.points) {
+      if (this.intersect_vector(pnt)) {
+        return new intersection(this, this.get_closest_plane(pnt), pnt);
+      }
+    }
+    for (let pnt of this.points) {
+      if (shape.intersect_vector(pnt)) {
+        return new intersection(shape, shape.get_closest_plane(pnt), pnt);
+      }
+    }
+    return false;
+  }
+  
+  intersect_vector(vec) {
+    let allInside = true;
+    for (let pln of this.normals) {
+      if (pln.dist(vec) > 0) {
         return false;
       }
-    } else {
-      return false;
+    }
+    return true;
+  }
+  
+  // returns 0 for intersection, otherwise returns distance closest to plane
+  crosses_plane(pln) {
+    let sign = null;
+    let dist = Infinity;
+    for (let pnt of this.points) {
+      let new_dist = pln.dist(pnt);
+      dist = min(dist, abs(new_dist));
+      switch (sign) {
+        case null:
+          if (new_dist > 0) {
+            sign = 1;
+          }
+          else {
+            sign = -1;
+          }
+          break;
+        case 1:
+          if (new_dist < 0) {
+            return 0;
+          }
+          break;
+        case -1:
+          if (new_dist > 0) {
+            return 0;
+          }
+          break;
+      }
+    }
+    return sign*dist;
+  }
+  
+  get_closest_point(pln) {
+    let min = Infinity;
+    let closest = null;
+    for (let vec of this.points) {
+      let newDist = abs(pln.dist(vec));
+      if (newDist < min) {
+        min=newDist;
+        closest = vec;
+      }
+    }
+    return closest;
+  }
+  
+  get_closest_plane(vec) {
+    let min = Infinity;
+    let closest = null;
+    for (let pln of this.normals) {
+      let newDist = abs(pln.dist(vec));
+      if (newDist < min) {
+        min=newDist;
+        closest = pln;
+      }
+    }
+    return closest;
+  }
+  
+  get_min_point(pln) {
+    let min = Infinity;
+    let closest = null;
+    for (let vec of this.points) {
+      let newDist = pln.dist(vec);
+      if (newDist < min) {
+        min=newDist;
+        closest = vec;
+      }
+    }
+    return closest;
+  }
+  
+  draw() {
+    beginShape();
+    for (let i of this.points) {
+      vertex(i.x, i.y);
+    }
+    if (this.intersect_vector(createVector(mouseX, mouseY))) {
+      stroke('blue');
+    }
+    for (let i of this.normals) {
+      line(i.origin.x, i.origin.y, i.origin.x+i.normal.copy().mult(10).x, i.origin.y+i.normal.copy().mult(10).y);
+      circle(i.origin.x, i.origin.y, 5);
+    }
+    endShape(CLOSE);
+  }
+}
+
+class plane_2d {
+  constructor(origin, normal) {
+    this.origin = origin;
+    this.normal = normal.normalize();
+  }
+  dist(vec) {
+    return p5.Vector.dot(this.normal, p5.Vector.sub(vec, this.origin));
+  }
+  copy() {
+    return new plane_2d(this.origin.copy(), this.normal.copy())
+  }
+}
+
+class collision_2d extends node {
+  constructor(parent, vertices) {
+    super(parent);
+    this.old_dir = this.parent.direction;
+    this.old_pos = this.parent.position.copy();
+    this.shape = new convex_shape(vertices);
+    this.shape.rotate(this.old_dir);
+    this.shape.translate(this.old_pos);
+    console.assert(this.parent instanceof entity_2d, "collision must be child of entity_2d!");
+  }
+  check(other){
+    // defining collisions
+    console.assert(other instanceof collision_2d, "collisions can only be checked with other collision objects!");
+    return this.shape.intersect_shape(other.shape);
+  }
+  __process() {
+    if (this.old_dir != this.parent.direction || !this.old_pos.equals(this.parent.postion)) {
+      this.shape.translate(this.old_pos.mult(-1));
+      this.shape.rotate(-this.old_dir);
+      this.shape.rotate(this.parent.direction);
+      this.shape.translate(this.parent.position);
+
+      this.old_dir = this.parent.direction;
+      this.old_pos = this.parent.position.copy();
+    }
+  }
+  __draw() {
+    if(DRAW_HITBOX) {
+      strokeWeight(1);
+      noFill();
+      stroke('red');
+      this.shape.draw();
     }
   }
 }
-class playerObj {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.vec = createVector(0, 0); // vector to move the tank
-    this.angle = 0; // stores the angle the tank is rotated to
-    this.vecHist = createVector(0, 0); // storing the past
-    this.blast = new fireworkObj(0);
-    this.dead = false;
-    this.blasted = false;
-    this.particle = [];
+
+class static_pos_hash_2d extends node {
+  constructor(parent) {
+    super(parent);
+    console.assert(parent instanceof entity_2d, "Collider attached to non positional node!");
+    let array_pos = this.world.get_collider_array_pos(this.parent.position);
+    this.last_array_pos = array_pos;
+    this.world.registerCollider(this, array_pos);
   }
-  draw() {
-    // Draw Tank
-    push();
-    stroke(0);
-    translate(this.x, this.y);
-    rotate(this.angle);
-    fill(25, 25, 112);
-
-    rect(-10, -10, 15, 20, 2);
-
-    rect(-5, -2, 17, 4, 2);
-
-    // Draw Tracks for the tank
-    fill(150);
-    rect(-12.5, -10, 20, 4, 2);
-    line(-10, -10, -10, -6);
-    line(-6, -10, -6, -6);
-    line(-2, -10, -2, -6);
-    line(2, -10, 2, -6);
-    line(5, -10, 5, -6);
-
-    rect(-12.5, 6, 20, 4, 2);
-    line(-10, 10, -10, 6);
-    line(-6, 10, -6, 6);
-    line(-2, 10, -2, 6);
-    line(2, 10, 2, 6);
-    line(5, 10, 5, 6);
-
-    pop();
+  remove() {
+    let array_pos = this.world.get_collider_array_pos(this.parent.position);
+    this.world.unregisterCollider(this, array_pos);
+    super.remove();
   }
-  move() {
-    // Moving the player based on the key pressed
-    // left/a key rotates the tank in the anti-clockwise direction, up/w moves the player forward, down/s moves the player backwards, right/d rotates the player in the clockwise direction
-    var xMove = 0;
-    var yMove = 0;
-
-    if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) {
-      // Turning the tank counter-clockwise
-      this.angle -= PI / 180;
-      if (this.angle > TWO_PI) {
-        this.angle = 0; // -(PI - (PI/180));
-      } else if (this.angle < 0) {
-        this.angle = TWO_PI;
-      }
-    }
-
-    if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) {
-      // turning the tank clockwise
-      this.angle += PI / 180;
-      if (this.angle > TWO_PI) {
-        this.angle = 0; // -(PI - (PI/180));
-      } else if (this.angle < 0) {
-        this.angle = TWO_PI;
-      }
-    }
-    if (keyIsDown(UP_ARROW) ||  keyIsDown(87)) {
-      // pressing the up arrow moves the tank in the direction it is facing
-      this.vec.set(this.x, this.y);
-      this.vec.setHeading(this.angle);
-      this.vec.setMag(1);
-    }
-    if (keyIsDown(DOWN_ARROW) || keyIsDown(83)) {
-      // the down arrow moves the tank in the reverse direction
-      this.vec.set(this.x, this.y);
-      this.vec.setHeading(this.angle);
-      this.vec.setMag(-1);
-    }
-
-    // Checking for wall collisions here
-    // if there is a collission go back a little and rotate
-    for (var i = 0; i < walls.length; i++) {
-      if (walls[i].checkCollision(this.x + this.vec.x, this.y + this.vec.y)) {
-        this.vec.mult(-1);
-      }
-    }
+}
+// Todo:
+// Add more collision shapes
+// In future projects, having a collision management object makes more sense than defining collision handling in each object
+class pos_hash_2d extends static_pos_hash_2d {
+  __process() {
+    let array_pos = this.world.get_collider_array_pos(this.parent.position);
+    // check if moved
     
-    // Checking for enemy collisions here
-    // if there is a collission go back a little and rotate
-    for (var i = 0; i < enemy.length; i++) {
-      if (enemy[i].checkCollision(this.x + this.vec.x, this.y + this.vec.y)) {
-        this.vec.mult(-1);
-      }
+    if (!this.last_array_pos.equals(array_pos)) {
+      this.world.unregisterCollider(this, this.last_array_pos);
+      this.world.registerCollider(this, array_pos);
+      this.last_array_pos = array_pos;
     }
-
-    // Updating the coordinates of the player
-
-    if (this.vec.mag() != 0) {
-      this.x += this.vec.x;
-      this.y += this.vec.y;
-      this.vecHist.mult(2);
-    }
-    this.vecHist.set(this.vec.x, this.vec.y); // setting the history to keep the tank in the state that it currently is in
-    this.vec.mult(0);
   }
-  killed(){ // drawing the state of the tank is the player is killed 
-     
-    push();
-    
-    translate(this.x, this.y);
-    rotate(this.angle);
-    stroke(0);
-    fill(25, 25, 90);
-    rect(-10, -10, 15, 20, 2);
-
-    rect(-5, -2, 17, 4, 2);
-
-    pop();
-  }
-  fire(){ // generating fire from the center of the tank
-        var p = new particleObj(this.x, this.y);
-    this.particle.push(p);
-    //iterate through the particle list in the reverse direction to avoid problems from splicing
-    for(var i = this.particle.length -1; i> 0; i--){
-      this.particle[i].update();
-      this.particle[i].draw();
-      if(this.particle[i].done()){
-        this.particle.splice(i, 1);
-      }
-    }
+  remove() {
+    this.world.unregisterCollider(this, this.last_array_pos);
+    super.remove()
   }
 }
 
-// The enemy tank is in the shoot state if the distance between the enemy tank and the player is less than 150 pixels
-// While in the shoot state the enemy tank sets the gun to face the player and then shoot bullet randomly
-class shootState {
-  constructor(x, y) {
-    this.move = 1;
-    this.velocisty = createVector(1, 1);
+class bullet extends entity_2d {
+  constructor(parent, position, direction, particle_effect, speed=2) {
+    super(parent, position, direction);
+    this.particle = particle_effect;
+    this.speed = speed;
+    this.emit = new emitter(this, particle_effect, p5.Vector.fromAngle(this.direction, 0.5), 0.5, 60, 30, 2, 1, 5);
+    this.collision = new collision_2d(this, vec_array([-5,-5, 5,0, -5,5]));
+    this.pos_hash = new pos_hash_2d(this);
   }
-  execute(me) {
-    var rand = int(random(0, 50)); // generating a random int between 0 and 50 for shooting
-    if (dist(me.x, me.y, player[0].x, player[0].y) > 150) { // change state if the distance is greater than 150
-      me.state = 1;
-    }
-    me.updateAngle(); // update the angle of the tank to face the player
-    for (var i = 0; i < 4; i++) { // check collision with the players bullets
-      if(bullets[i].fired){
-      if (bullets[i].los(me.x, me.y, me.index)) { // if the tank is in the players line of sight switch to avoid state
-        me.state = 2;
-      }
-      if (dist(me.x, me.y, bullets[i].x, bullets[i].y) < 20) {
-        bullets[i].fired = false;
-        me.state = 3;
-      }
-    }
-    if (me.bullet[0].fired) { // check if the tanks bullet hits the player or not
-      if (dist(player[0].x, player[0].y, me.bullet[0].x, me.bullet[0].y) < 20) {
-        gameOver = true;
-        player[0].dead = true;
-      }
-      for(var i = 0 ; i < enemy.length; i++){ //stop the bullet if it hits a destroyed enemy tank 
-        if (i != me.index) {
-          if (enemy[i].state == 3){
-            if (dist(enemy[i].x, enemy[i].y, me.bullet[0].x, me.bullet[0].y) < 20){
-              me.bullet[0].fired = false;
+  __process() {
+    // do collisions
+    this.world.forNearby(this.world.get_collider_array_pos(this.position), function(ent){
+      let ent_coll = ent.parent.hasInstance(collision_2d);
+      if (ent_coll && ent_coll != this.collision) {
+        let coll = this.collision.check(ent_coll)
+        if (coll) {
+          if (ent.parent instanceof tank) {
+            ent.parent.blow_up();
+            if (ent.parent instanceof enemy && ent.parent.alive == true) {
+              this.world.score++;
+              if (this.world.score >= 5) {
+                this.world.state = WON;
+              }
             }
+            this.blow_up();
+          }
+          else if (ent.parent instanceof bullet){
+            ent.parent.blow_up();
+            this.blow_up();
+          }
+          else {
+            this.blow_up();
           }
         }
       }
-    }
-    //checking collision with the player
-      if (dist(me.x, me.y, player[0].x, player[0].y) < 20){
-        this.velocity.setHeading(me.angle);
-        this.velocity.setMag(-0.5);
-        me.x+= this.velocity.x;
-        me.y += this.velocity.y;
-      }
-      // shooting action
-    if (rand == 5 && !me.bullet[0].fired) { 
-      var projectedAngle = me.vec.heading();
-      if (projectedAngle < 0) {
-        projectedAngle += 2 * PI;
-      }
-      var angleDiff = abs(projectedAngle - me.angle);
-      if (angleDiff < PI / 90) {
-        if (currFrameCount < frameCount - 10) {
-          currFrameCount = frameCount;
-          me.bullet[0].fired = true;
-          me.bullet[0].x = me.x;
-          me.bullet[0].y = me.y;
-          me.bullet[0].angle = me.angle - PI / 2;
-          me.bullet[0].blocked = false;
-        }
-      }
-    }
-  }
-}
-}
-// The tank is in the Chase State when the distance between the enemy tank and the player is greater than 150 pixels. Int this state the enemy tank chases the playeer tank. In the state the tank checks for collisions with enemy, player and the walls. The tank also checks if it is in a bullets line of sight or if it is dead and changes to a different state accordingly. (As done in the chase state)
-class chaseState {
-  constructor() {
-    this.move = 0.5;
-    this.velocity = createVector(1, 1);
-  }
-  execute(me) {
-    this.move = 0.5;
-    for (var i = 0; i < 4; i++) {
-      if (bullets[i].fired){
-      if (bullets[i].los(me.x, me.y, me.index)) {
-        me.state = 2;
-      } else if (dist(me.x, me.y, bullets[i].x, bullets[i].y) < 20) {
-        bullets[i].fired = false;
-        me.state = 3;
-      }
-      }
-    }
-    if (dist(me.x, me.y, player[0].x, player[0].y) <= 150) {
-      me.state = 0;
-    }
-    if (me.bullet[0].fired) {
-      if (dist(player[0].x, player[0].y, me.bullet[0].x, me.bullet[0].y) < 20) {
-        gameOver = true;
-        player[0].dead = true;
-      }
-      for(var i = 0 ; i < enemy.length; i++){
-        if (i != me.index) {
-          if (enemy[i].state == 3){
-            if (dist(enemy[i].x, enemy[i].y, me.bullet[0].x, me.bullet[0].y) < 20){
-              me.bullet[0].fired = false;
-            }
-          }
-        }
-      }
-    }
-    me.updateAngle();
-    this.velocity.setHeading(me.angle);
-    this.velocity.setMag(this.move);
-    for (i = 0; i < walls.length; i++) {
-      if (
-        walls[i].checkCollision(me.x + this.velocity.x, me.y + this.velocity.y)
-      ) {
-        me.angle += PI / 180;
-        this.move = -this.move;
-        this.velocity.setMag(this.move);
-      }
-    }
-    for (i = 0; i < enemy.length; i++) {
-      if (i != me.index) {
-        if (
-          enemy[i].checkCollision(
-            me.x + this.velocity.x,
-            me.y + this.velocity.y
-          )
-        ) {
-          me.angle += PI / 180;
-          this.move = -this.move;
-          this.velocity.setMag(this.move);
-          // print("Here");
-        }
-      }
-    }
-    me.x += this.velocity.x;
-    me.y += this.velocity.y;
-  }
-}
+    }, 1, this);
 
-// The tank is in the avoidState when it is in a bullets line of sight. When in the avoid state the enemy tank rotates until the angle between the bullet and the tanks is more than 80 degrees and then tries to move away from the bullet. Also, in this checks the tank check for collision and if it hits the bullet then switches the state to dead. If the bullet is no more in the line of sight of the tank then go back to the shoot state. 
-class avoidState {
-  constructor() {
-    this.bulletAngle = 0;
-    this.tankAngle = 0;
-    this.velocity = createVector(1, 1);
-    this.fire = [false, false, false, false];
-    this.noFire = true;
-    this.move = 1;
-  }
-  execute(me) {
-    this.move = 1;
-    if (me.bullet[0].fired) {
-      if (dist(player[0].x, player[0].y, me.bullet[0].x, me.bullet[0].y) < 20) {
-        gameOver = true;
-        player[0].dead = true;
-      }
-      for(var i = 0 ; i < enemy.length; i++){
-        if (i != me.index) {
-          if (enemy[i].state == 3){
-            if (dist(enemy[i].x, enemy[i].y, me.bullet[0].x, me.bullet[0].y) < 20){
-              me.bullet[0].fired = false;
-            }
-          }
-        }
-      }
+    // Force within bounds of level
+    let edge = new plane_2d(createVector(0,0), createVector(1,0));
+    if (this.collision.shape.crosses_plane(edge) <= 0) {
+      this.blow_up();
     }
-    // check if the tank is pointing in the same direction
-    this.tankAngle = me.angle * (180 / PI);
-    if (this.tankAngle >= 180) {
-      this.tankAngle = this.tankAngle - 180;
+    edge.normal = createVector(0,1);
+    if (this.collision.shape.crosses_plane(edge) <= 0) {
+      this.blow_up();
     }
-    if (this.bulletAngle >= 180) {
-      this.bulletAngle = this.bulletAngle - 180;
+    edge.origin.x = this.world.level_width;
+    edge.normal = createVector(-1,0);
+    if (this.collision.shape.crosses_plane(edge) <= 0) {
+      this.blow_up();
     }
-    // print(this.tankAngle, this.bulletAngle);
-    if (abs(this.bulletAngle - this.tankAngle) <= 80) {
-      if (this.bulletAngle > this.tankAngle) {
-        me.decreaseAngle(); // if so rotate
-        // print("here");
-      } else if (this.bulletAngle < this.tankAngle) {
-        me.increaseAngle(); // if so rotate
-        // print("here2");
-      }
-    } else {
-      // if there is a difference of atleast 45 degrees then just move
-      this.velocity.setHeading(me.angle);
-      this.velocity.setMag(this.move);
-      for (i = 0; i < walls.length; i++) {
-        if (
-          walls[i].checkCollision(
-            me.x + this.velocity.x,
-            me.y + this.velocity.y
-          )
-        ) {
-          me.increaseAngle();
-          this.move = -this.move;
-          this.velocity.setMag(this.move);
-        }
-      }
-      for (i = 0; i < enemy.length; i++) {
-        if (i != me.index) {
-          if (
-            enemy[i].checkCollision(
-              me.x + this.velocity.x,
-              me.y + this.velocity.y
-            )
-          ) {
-            me.increaseAngle();
-            this.move = -this.move;
-            this.velocity.setMag(this.move);
-          }
-        }
-      }
-      me.x += this.velocity.x;
-      me.y += this.velocity.y;
-      for (var i = 0; i < 4; i++) {
-        if (bullets[i].fired) {
-          this.fire[i] = true;
-        } else {
-          this.fire[i] = false;
-        }
-      }
-      this.noFire = true;
-      for (var i = 0; i < 4; i++) {
-        if (this.fire[i]) {
-          this.noFire = false;
-        }
-      }
-      if (this.noFire) {
-        me.state = 0;
-      }
+    edge.origin.y = this.world.level_height;
+    edge.normal = createVector(0,-1);
+    if (this.collision.shape.crosses_plane(edge) <= 0) {
+      this.blow_up();
     }
-        for (var i = 0; i < 4; i++) {
-      if (bullets[i].fired) {
-        this.bulletAngle = (bullets[i].angle + HALF_PI) * (180 / PI);
-        if (dist(me.x, me.y, bullets[i].x, bullets[i].y) < 20) {
-          bullets[i].fired = false;
-          me.state = 3;
-        }
-      }
-    }
+    this.position.add(p5.Vector.fromAngle(this.direction, this.speed));
   }
-}
-
-// When in this state the tank has been destroyed. 
-class deathState {
-  constructor() {
-    this.move = 1;
+  blow_up() {
+    //(parent, particle, vel, vel_dev, life_max, life_min, emit_max, emit_min, emit_delta, oneshot=false, offset=createVector(0,0))
+    new emitter(this.world, this.particle, createVector(0,0), 3, 15, 5, 15, 2, 1, 120, this.position.copy());
+    this.remove();
   }
-  execute(me) {
-    // draw the fireworks once when the tank dies (Code taken from the class examples)
-    if (me.blast.step == 0) {
-      me.blast.position.set(me.x, me.y);
-      me.blast.target.set(me.x, me.y - 50);
-      me.blast.direction.set(
-        me.blast.target.x - me.blast.position.x,
-        me.blast.target.y - me.blast.position.y
-      );
-      var s = random(1, 2) / 100;
-      me.blast.direction.mult(s);
-      me.blast.step++;
-    } else if (me.blast.step == 1) {
-      me.blast.draw();
-    } else if (me.blast.step == 2) {
-      for (var i = 0; i < me.blast.explosions.length; i++) {
-        me.blast.explosions[i].draw();
-      }
-      if (me.blast.explosions[0].timer <= 0) {
-        me.blast.step++;
-      }
-    }
-    if (me.bullet[0].fired) {
-      if (dist(player[0].x, player[0].y, me.bullet[0].x, me.bullet[0].y) < 20) {
-        gameOver = true;
-        player[0].dead = true;
-      }
-      for(var i = 0 ; i < enemy.length; i++){
-        if (i != me.index) {
-          if (enemy[i].state == 3){
-            if (dist(enemy[i].x, enemy[i].y, me.bullet[0].x, me.bullet[0].y) < 20){
-              me.bullet[0].fired = false;
-            }
-          }
-        }
-      }
-    }
-    for (var i = 0; i < 4; i++) {
-      if (dist(me.x, me.y, bullets[i].x, bullets[i].y) < 20) {
-        bullets[i].fired = false;
-        me.state = 3;
-      }
-    }
-    me.dead = true; // kill  the tank 
-    me.killed(); // draw its destroyed state
-    me.fire(); // draw the fire originating from the tank
-  }
-}
-// Creating the enemy tank
-class enemyObj {
-  constructor(x, y, ind) {
-    this.index = ind;
-    this.x = x;
-    this.y = y;
-    this.initAngle = random(0, 2 * PI);
-    this.angle = this.initAngle;
-    this.vec = createVector(0, 0);
-    this.angleDir = 0;
-    this.bullet = [new bulletObj(this.x, this.y, this.angle)];
-    this.states = [
-      new shootState(),
-      new chaseState(),
-      new avoidState(),
-      new deathState(),
-    ]; // different state objects of the tank
-    this.state = 0;
-    this.blast = new fireworkObj(2);
-    this.dead = false;
-    this.scored = false;
-    this.particle =[];
-  }
-  draw() {
-    push();
-    stroke(0);
-    translate(this.x, this.y);
-    rotate(this.angle);
-    fill(136, 8, 8);
-    rect(-10, -10, 15, 20, 2);
-
-    rect(-5, -2, 17, 4, 2);
-
-    // Draw Tracks for the tank
-    fill(150);
-    rect(-12.5, -10, 20, 4, 2);
-    line(-10, -10, -10, -6);
-    line(-6, -10, -6, -6);
-    line(-2, -10, -2, -6);
-    line(2, -10, 2, -6);
-    line(5, -10, 5, -6);
-
-    rect(-12.5, 6, 20, 4, 2);
-    line(-10, 10, -10, 6);
-    line(-6, 10, -6, 6);
-    line(-2, 10, -2, 6);
-    line(2, 10, 2, 6);
-    line(5, 10, 5, 6);
-
-    pop();
-  }
-  killed() {
-    push();
-    stroke(0);
-    translate(this.x, this.y);
-    rotate(this.angle);
-    fill(136, 8, 8);
-    rect(-10, -10, 15, 20, 2);
-
-    rect(-5, -2, 17, 4, 2);
-    pop();
-  }
-  decreaseAngle() {
-    this.angle -= PI / 45;
-  }
-  increaseAngle() {
-    this.angle += PI / 45;
-  }
-  updateAngle() { // update the angle of the tank to face the player tank.
-    this.vec.set(player[0].x - this.x, player[0].y - this.y);
-    var projectedAngle = this.vec.heading();
-    if (projectedAngle < 0) {
-      projectedAngle += 2 * PI;
-    }
-    var angleDiff = abs(projectedAngle - this.angle);
-
-    if (angleDiff > PI / 90) {
-      if (projectedAngle > this.angle) {
-        this.angleDir = PI / 180;
-      } else {
-        this.angleDir = -(PI / 180);
-      }
-      if (angleDiff > TWO_PI - 5 * (PI / 180)) {
-        this.angleDir = -this.angleDir;
-      }
-
-      this.angle += this.angleDir;
-      if (this.angle > TWO_PI) {
-        this.angle = 0; // -(PI - (PI/180));
-      } else if (this.angle < 0) {
-        this.angle = TWO_PI;
-      }
-    }
-  }
-  checkCollision(x, y) {
-    if (dist(this.x, this.y, x, y) < 25) {
-      return true;
-    } else {
-      return false;
-    }
-  }
-    fire(){ // to start drawing the fire originating at the center of the enemy tank. 
-        var p = new particleObj(this.x, this.y);
-    // print(p);
-    this.particle.push(p);
-    //print(this.particle.length);
-    for(var i = this.particle.length -1; i> 0; i--){
-      // print(this.particle[i]);
-      this.particle[i].update();
-      this.particle[i].draw();
-      if(this.particle[i].done()){
-        this.particle.splice(i, 1);
-      }
-    }
-  }
-}
-
-class wallObj {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.cx = this.x + 10;
-    this.cy = this.y + 10;
-  }
-  draw() {
-    fill(67, 70, 75);
-    stroke(0);
+  __draw() {
+    translate(this.position);
+    rotate(this.direction);
+    stroke('black');
+    fill('white');
     strokeWeight(1);
-    rect(this.x, this.y, 20, 20, 2);
+    triangle(-5,-5, 5,0, -5,5);
+    rotate(-this.direction);
+    translate(this.position.copy().mult(-1));
   }
-  checkCollision(x, y) {
-    // if the distance between there x and y values is less than 15 a collision is detected
-    if (abs(x - this.cx) < 20 && abs(y - this.cy) < 25) {
-      return true;
-    } else {
-      return false;
+}
+
+class tank_physics extends node {
+  constructor(parent) {
+    super(parent);
+    this.pos_hash = this.parent.hasInstance(pos_hash_2d);
+    this.collision = this.parent.hasInstance(collision_2d);
+    //print(this.pos_hash);
+    console.assert(parent instanceof entity_2d, "Parent of tank_physics must be entity_2d");
+    console.assert(this.pos_hash, "Parent of tank_physics needs a pos_hash_2d!");
+    console.assert(this.collision, "Parent of tank_physics needs a collision_2d!");
+    this.velocity = 0;
+    this.rot_vel = 0;
+    this.top_rot_speed = TWO_PI/180;
+    this.top_speed = 1;
+    this.accel = 0.05;
+    this.rot_accel = PI/360;
+    this.input_forward = 0;
+    this.input_turn    = 0;
+    this.shoot = false;
+    this.cooldown = 0;
+  }
+  __process() {
+    // Process inputs
+    this.velocity = towards_number(this.velocity, this.top_speed*this.input_forward,  this.accel);
+    this.rot_vel  = towards_number(this.rot_vel,  this.top_rot_speed*this.input_turn, this.rot_accel);
+    
+    if (this.shoot && this.cooldown == 0) {
+      this.cooldown = 60;
+      new bullet(this.world, this.parent.position.copy().add(p5.Vector.fromAngle(this.parent.direction,20)), this.parent.direction, this.parent.particle);
     }
-  }
-  checkCollisionB(x, y) {
-    if (abs(x - this.cx) < 12 && abs(y - this.cy) < 12) {
-      return true;
-    } else {
-      return false;
+    if (this.cooldown > 0) {      
+      this.cooldown--;
+    }
+    this.shoot = false;
+    // process velocity
+    this.parent.direction  += this.rot_vel;
+    this.parent.position.x += this.velocity*cos(this.parent.direction);
+    this.parent.position.y += this.velocity*sin(this.parent.direction);
+    
+
+    /*
+      Loops is to ensure processing stops when no collisions exist. The issue without the loop is that
+      some collision corrections could push you into other collisions. The 1.1 multipliers are too
+      give a little bit of overshoot to ensure that a collision correction isn't actually enough to
+      correct the collision. MAX_COLLISION_LOOPS is an extra safety measure for a rare case where
+      we get stuck regardless.
+    */
+    let collided = true;
+    for (let count = 0; collided && count < MAX_COLLISION_LOOPS && this.parent.alive; count++)
+    {
+      collided = false;
+    
+      // do collisions
+      this.world.forNearby(this.world.get_collider_array_pos(this.parent.position), function(ent){
+        let ent_coll = ent.parent.hasInstance(collision_2d);
+        if (ent.parent instanceof wall || ent.parent instanceof tank){
+          if (ent_coll && ent_coll != this.collision) {
+            let coll = this.collision.check(ent_coll)
+            if (coll) {
+              if (coll.shape==this.collision.shape) {
+                collided = true;
+                this.parent.position.add(coll.plane.normal.copy().mult(1.1).mult(coll.plane.dist(coll.point)));
+              }
+              else {
+                collided = true;
+                this.parent.position.sub(coll.plane.normal.copy().mult(1.1).mult(coll.plane.dist(coll.point)));
+              }
+              this.velocity *= 0.90;
+            }
+          }
+        }
+      }, 1, this);
+      
+      // Force within bounds of level
+      let edge = new plane_2d(createVector(0,0), createVector(1,0));
+      if (this.collision.shape.crosses_plane(edge) <= 0) {
+        let vec = this.collision.shape.get_min_point(edge)
+        collided = true;
+        this.parent.position.add(edge.normal.copy().mult(-1.1).mult(edge.dist(vec)));
+        this.velocity *= 0.90;
+      }
+      edge.normal = createVector(0,1);
+      if (this.collision.shape.crosses_plane(edge) <= 0) {
+        let vec = this.collision.shape.get_min_point(edge)
+        collided = true;
+        this.parent.position.add(edge.normal.copy().mult(-1.1).mult(edge.dist(vec)));
+        this.velocity *= 0.90;
+      }
+      edge.origin.x = this.world.level_width;
+      edge.normal = createVector(-1,0);
+      if (this.collision.shape.crosses_plane(edge) <= 0) {
+        let vec = this.collision.shape.get_min_point(edge)
+        collided = true;
+        this.parent.position.add(edge.normal.copy().mult(-1.1).mult(edge.dist(vec)));
+        this.velocity *= 0.90;
+      }
+      edge.origin.y = this.world.level_height;
+      edge.normal = createVector(0,-1);
+      if (this.collision.shape.crosses_plane(edge) <= 0) {
+        let vec = this.collision.shape.get_min_point(edge)
+        collided = true;
+        this.parent.position.add(edge.normal.copy().mult(-1.1).mult(edge.dist(vec)));
+        this.velocity *= 0.90;
+      }
+      this.collision.__process();
     }
   }
 }
-var bullets = []; // Storing the bullets for the player
+
+class player_controller extends node {
+  constructor(parent) {
+    super(parent);
+    this.physics = this.parent.hasInstance(tank_physics)
+    console.assert(this.physics, "Parent node needs tank_physics");
+  }
+  __process() {
+    if (DIR_INPUT[1] > 0) {
+      this.physics.input_forward = 1;
+    }
+    else if (DIR_INPUT[1] < 0) {
+      this.physics.input_forward = -1;
+    }
+    else {
+      this.physics.input_forward = 0;
+    }
+    if (DIR_INPUT[0] < 0) {
+      this.physics.input_turn = -1;
+    }
+    else if (DIR_INPUT[0] > 0) {
+      this.physics.input_turn = 1;
+    }
+    else {
+      this.physics.input_turn = 0;
+    }
+    if (SPACE_WAS_PRESSED) {
+      SPACE_WAS_PRESSED = false;
+      this.physics.shoot = true;
+    }
+  }
+  remove() {
+    this.parent.physics.input_forward = 0;
+    this.parent.physics.input_turn    = 0;
+    this.parent.physics.shoot         = false;
+    this.world.state = LOST;
+    super.remove();
+  }
+}
+
+class enemy_controller extends node {
+  constructor(parent) {
+    super(parent);
+    console.assert(this.parent instanceof tank, "Attached physics controller to non-physics node");
+    this.state = this.fire_at_player;
+    this.current_worry = null;
+  }
+  __process() {
+    // this.state.execute()
+    // the following line accomplishes the same thing as above but with less fuss. There's no point
+    // in using inheritance if there is no data stored in the class or checks for type. While the
+    // inheritance model does look cleaner than a switch, so does calling a function reference.
+    if (!this.world.player.alive) {
+      this.remove();
+      return;
+    }
+    this.state();
+    
+    // check if there's a dangerous missile in range
+    this.world.forNearby(this.world.get_collider_array_pos(this.parent.position), function(ent){
+      if (ent.parent instanceof bullet &&
+          this.bullet_dangerous(ent.parent) &&
+          (ent.parent.position.copy().sub(this.parent.position).magSq() < 10000)) {
+        this.state = this.avoid_missile;
+        this.current_worry = ent.parent;
+      }
+    }, 3, this);
+
+    if (this.state != this.fire_at_player) {
+      return; // break if anything higher priority is happening
+    }
+    
+    // if player is within 150 distance units
+    this.current_worry = this.world.player;
+    if (this.world.player.position.copy().sub(this.parent.position).magSq() < 10000) {
+      this.state = this.give_chase;
+    }
+    else {
+      this.current_worry = this.world.player;
+      this.state = this.fire_at_player;
+    }
+    
+  }
+  
+  avoid_missile() {
+    let m_dir = p5.Vector.fromAngle(this.current_worry.direction);
+    let m_pos = this.current_worry.position.copy();
+    let t_dir = p5.Vector.fromAngle(this.parent.direction);
+    let t_pos = this.parent.position.copy();
+    
+    let facing_missile = -p5.Vector.dot(m_dir, t_dir);
+    let left_of_path   = p5.Vector.dot(m_dir.copy().rotate(-HALF_PI), t_pos.copy().sub(m_pos));
+    let facing_path    = -p5.Vector.dot(m_dir.copy().rotate(-HALF_PI), t_dir)*(2*(left_of_path < 0)-1);
+    if (facing_missile < -0.71) {
+      this.parent.physics.input_forward = 1;
+    }
+    else if (facing_missile > 0.71) {
+      this.parent.physics.input_forward = -1;
+    }
+    else if (facing_path > 0) {
+      this.parent.physics.input_forward = 1;
+    }
+    else {
+      this.parent.physics.input_forward = -1;
+    }
+    if (facing_missile > 0) {
+      this.parent.physics.input_turn = 1;
+    }
+    else {
+      this.parent.physics.input_turn = -1;
+    }
+  
+    // if it no longer exists or is no longer dangerous
+    if (!this.current_worry.collision || !this.bullet_dangerous(this.current_worry)) {
+      this.current_worry = this.world.player;
+      this.state = this.fire_at_player;
+      this.parent.physics.input_forward = 0;
+      this.parent.physics.input_turn    = 0;
+    }
+  }
+  give_chase() {
+    if (this.can_see_player()) {
+      let p_pos = this.current_worry.position.copy();
+      let t_pos = this.parent.position.copy();
+      let p_dir = p5.Vector.fromAngle(this.current_worry.direction);
+      let t_dir = p5.Vector.fromAngle(this.parent.direction);
+      let forward_dist = p5.Vector.dot(p_pos.copy().sub(t_pos),t_dir);
+      let angle = p_pos.copy().sub(t_pos).angleBetween(t_dir);
+
+      if (forward_dist > 0 && p5.Vector.sub(p_pos, t_pos).magSq() > 600) {
+        this.parent.physics.input_forward = 1;
+      }
+      else {
+        this.parent.physics.input_forward = 0; 
+      }
+      if (angle > 0) {
+        this.parent.physics.input_turn = -1;
+      }
+      else {
+        this.parent.physics.input_turn =  1;
+      }
+      if (abs(angle) < 0.2) {
+        this.parent.physics.shoot = true;
+      }
+    }
+    else {
+      this.parent.physics.input_forward = 0;
+      this.parent.physics.input_turn    = 0;
+    }
+    
+  }
+  fire_at_player() {
+    if (this.current_worry === null) {
+      return;
+    }
+    let t_pos = this.parent.position.copy();
+    let p_dir = p5.Vector.fromAngle(this.world.player.direction);
+    let t_dir = p5.Vector.fromAngle(this.parent.direction);
+    let p_pos = this.world.player.position.copy();
+    let angle = p_pos.copy().sub(t_pos).angleBetween(t_dir);
+    if (this.can_see_player()) {
+      if (angle > 0) {
+        this.parent.physics.input_turn = -1;
+      }
+      else {
+        this.parent.physics.input_turn =  1;
+      }
+      if (abs(angle) < 0.2) {
+        this.parent.physics.shoot = true;
+      }
+    }
+    else {
+      this.parent.physics.input_forward = 0;
+      this.parent.physics.input_turn    = 0;
+    }
+
+  }
+can_see_player() {
+  let t_pos = this.parent.position.copy();
+  let p_dir = p5.Vector.fromAngle(this.world.player.direction);
+  let t_dir = p5.Vector.fromAngle(this.parent.direction);
+  let p_pos = this.world.player.position.copy();
+  let in_front = new plane_2d(t_pos.copy(),p_pos.copy().sub(t_pos));
+  let in_front_player = new plane_2d(p_pos.copy(),t_pos.copy().sub(p_pos));
+  let sight_line = new plane_2d(t_pos.copy(),p_pos.copy().sub(t_pos).rotate(HALF_PI));
+  let can_see = true;
+
+  this.world.forLine(this.world.get_collider_array_pos(t_pos),
+                     this.world.get_collider_array_pos(p_pos),
+    function(ent){
+      let ent_coll = ent.parent.hasInstance(collision_2d);  
+      if (ent_coll &&
+          ent_coll.parent instanceof wall && 
+          in_front.dist(ent_coll.parent.position) > 0 &&
+          in_front_player.dist(ent_coll.parent.position) > 0 &&
+          ent_coll.shape.crosses_plane(sight_line) == 0) {
+        can_see = false;
+      }
+    }, 1, this);
+  return can_see;
+  }
+  bullet_dangerous(bull) {
+    // If in direction bullet travels in
+    let m_dir = p5.Vector.fromAngle(bull.direction)
+    if (p5.Vector.dot(m_dir, p5.Vector.sub(this.parent.position, bull.position)) > 0) {
+      //if in bullets path
+      if (abs(m_dir.rotate(HALF_PI).dot(p5.Vector.sub(this.parent.position, bull.position))) < 50) {
+        return true;
+      }
+    }
+    return false;
+  }
+  remove() {
+    this.parent.physics.input_forward = 0;
+    this.parent.physics.input_turn    = 0;
+    this.parent.physics.shoot         = false;
+    super.remove();
+  }
+  
+}
+/*
+  These are classes specific to the current game
+  // image locations
+const PLAYER               = [0,0];
+const ENEMY                = [0,1];
+const DEAD                 = [0,2];
+const WALL_CORNER_CONVEX   = [2,1];
+const WALL_CORNER_CONCAVE  = [1,1];
+const WALL_SIDE_HORIZONTAL = [1,0];
+const WALL_SIDE_VERTICAL   = [2,0];
+const EMPTY                = [1,2];
+*/
+
+class wall extends entity_2d { 
+  constructor(parent, posistion, direction, neighbors) {
+    super(parent, posistion, direction, neighbors);
+    let points =  []
+    this.pos_hash = new static_pos_hash_2d(this, this.position);
+    this.sprite = [];
+    let masks = [
+      (1<<2)*!!(neighbors & 0b0000000010)+(1<<1)*!!(neighbors & 0b0000000001)+!!(neighbors & 0b0000001000),
+      (1<<2)*!!(neighbors & 0b0000000010)+(1<<1)*!!(neighbors & 0b0000000100)+!!(neighbors & 0b0000100000), 
+      (1<<2)*!!(neighbors & 0b0010000000)+(1<<1)*!!(neighbors & 0b0001000000)+!!(neighbors & 0b0000001000), 
+      (1<<2)*!!(neighbors & 0b0010000000)+(1<<1)*!!(neighbors & 0b0100000000)+!!(neighbors & 0b0000100000), 
+      ];
+    for (let i = 0; i < 4; i++) {
+      switch(masks[i]) {
+        case 0b0111:
+          this.sprite.push(EMPTY);
+          break;
+        case 0b0110:
+          this.sprite.push(WALL_SIDE_VERTICAL);
+          break;
+        case 0b0101:
+          this.sprite.push(WALL_CORNER_CONCAVE);
+          break;
+        case 0b0100:
+          this.sprite.push(WALL_SIDE_VERTICAL);
+          break;
+        case 0b0011:
+          this.sprite.push(WALL_SIDE_HORIZONTAL);
+          break;
+        case 0b0010:
+          this.sprite.push(WALL_CORNER_CONVEX);
+          break;
+        case 0b0001:
+          this.sprite.push(WALL_SIDE_HORIZONTAL);
+          break;
+        case 0b0000:
+          this.sprite.push(WALL_CORNER_CONVEX);
+          break; 
+      }
+    }
+    // same as above but the order needs to change to construct the hitbox properly (z-order to clockwise)
+    for (let i of [0,1,3,2]) {
+      let offsetx = !!(i&0b01)*2 - 1;
+      let offsety = !!(i&0b10)*2 - 1;
+      switch(masks[i]) {
+        case 0b0111:
+          points.push(offsetx*10);
+          points.push(offsety*10);
+          break;
+        case 0b0110:
+          points.push(offsetx*8);
+          points.push(offsety*10);
+          break;
+        case 0b0101:
+          points.push(offsetx*10);
+          points.push(offsety*10);
+          break;
+        case 0b0100:
+          points.push(offsetx*8);
+          points.push(offsety*10);
+          break;
+        case 0b0011:
+          points.push(offsetx*10);
+          points.push(offsety*8);
+          break;
+        case 0b0010:
+          points.push(offsetx*10);
+          points.push(offsety*10);
+          break;
+        case 0b0001:
+          points.push(offsetx*10);
+          points.push(offsety*8);
+          break;
+        case 0b0000:
+          switch(i){
+            case 0:
+              points.push(-8);
+              points.push(-7);
+              points.push(-7);
+              points.push(-8);
+              break;
+            case 1:
+              points.push( 7);
+              points.push(-8);
+              points.push( 8);
+              points.push(-7);
+              break;
+            case 3:
+              points.push(8);
+              points.push(7);
+              points.push(7);
+              points.push(8);
+              break;
+            case 2:
+              points.push(-7);
+              points.push( 8);
+              points.push(-8);
+              points.push( 7);
+              break;
+          }
+          break; 
+      }
+    }
+    this.collision = new collision_2d(this, vec_array(points));
+
+
+  }
+  __draw() {
+    for (let i = 0; i < 4; i++) {
+      this.world.sprites.draw_tile_quad(this.sprite[i], i, this.position, 0);
+      //this.world.sprites.draw_tile_quad([2,1], i, this.position, 0);
+    }
+    
+  }
+}
+
+class explosion extends entity_2d {
+  constructor(parent, posistion, direction, frame) {
+    super(parent, posistion, direction);
+    this.frame = frame
+  }
+  __draw() {
+    noStroke();
+    fill('red');
+    let frame_c = frameCount;
+    let size = lerp(20, 0, (frame_c - (this.frame+60))/60);
+    if (size > 0)
+    {
+      translate(this.position.x, this.position.y);
+      rotate((frame_c)/10);
+      rect(-size/2, -size/2, size, size);
+      rotate(QUARTER_PI);
+      rotate(-(frame_c)/5);
+      rect(-size/2, -size/2, size, size);
+      rotate(QUARTER_PI+((frame_c)/10));
+      
+      fill('orange')
+      rotate((frame_c)/10);
+      rect(-size/4, -size/4, size/2, size/2);
+      rotate(QUARTER_PI);
+      rotate(-(frame_c)/5);
+      rect(-size/4, -size/4, size/2, size/2);
+      rotate(-3*QUARTER_PI+((frame_c)/10));
+      translate(-this.position.x, -this.position.y);
+    }
+  }
+}
+
+class tank extends entity_2d {
+  constructor(parent, posistion, direction) {
+    super(parent, posistion, direction);
+    this.collision = new collision_2d(this, vec_array([-10,-10, 6,-10, 6,10, -10,10]));
+    this.pos_hash = new pos_hash_2d(this);
+    this.physics = new tank_physics(this);
+    this.alive = true;
+  }
+  blow_up() {
+    this.alive = false;
+    this.controller.remove();
+  }
+}
+
+class player extends tank {
+  constructor(parent, posistion, direction) {
+    super(parent, posistion, direction);
+    this.controller = new player_controller(this);
+    this.particle = bullet_trail_blue;
+  }
+  __draw() {
+    if (this.alive) {
+      this.world.sprites.draw_sprite(PLAYER, this.position, this.direction);
+    }
+    else {
+      this.world.sprites.draw_sprite(DEAD, this.position, this.direction);
+    }
+  }
+}
+
+class enemy extends tank {
+  constructor(parent, posistion, direction) {
+    super(parent, posistion, direction);
+    this.controller = new enemy_controller(this);
+    this.particle = bullet_trail_red;
+  }
+  __draw() {
+    if (this.alive) {
+      this.world.sprites.draw_sprite(ENEMY, this.position, this.direction);
+    }
+    else {
+      this.world.sprites.draw_sprite(DEAD, this.position, this.direction);
+    }
+  }
+}
+
+
+/*
+  This part is for making sprites
+*/
+
+class spriteSheet {
+  constructor(canvas) {
+    canvas.clear();
+    
+    // Blocks
+    // Four corners - outer
+    noFill();
+    stroke(0,255,0, 32)
+    translate(30,30);
+    for (let i = 6; i > 0; i--) {
+      strokeWeight(i)
+      rect(-21,-21,14,14,4);
+      rect(7,-21,14,14,4);
+      rect(7,7,14,14,4);
+      rect(-21,7,14,14,4);
+    }
+    fill('black');
+    erase(255,0);
+    rect(-30,-30,60,20);
+    rect(-30,-30,20,60);
+    rect(-30,10,60,20);
+    rect(10,-30,20,60);
+    noErase();
+    noFill();
+    
+    // sides - lr
+    translate(-20,-20);
+    for (let i = 6; i > 0; i--) {
+      strokeWeight(i)
+      rect(-7,-7,14+40,14,4);
+    }
+    fill('black');
+    erase(255,0);
+    rect(-10,-10,20,20);
+    rect(30,-10,20,20);
+    noErase();
+    noFill();
+    // sides - ud
+    translate(40,-20);
+     for (let i = 6; i > 0; i--) {
+      strokeWeight(i)
+      rect(-7,-7,14,14+40,4);
+    }
+    fill('black');
+    erase(255,0);
+    rect(-10,-10,20,20);
+    rect(-10,30,20,20);
+    noErase();
+    noFill();
+    translate(0,40);
+    noFill();
+    stroke(0,255,0, 32)
+    for (let i = 6; i > 0; i--) {
+      strokeWeight(i)
+      rect(-7,-7,14,14,4);
+    }
+
+
+    
+    
+    // player
+    resetMatrix();
+    translate(10,10);
+    
+    noStroke();
+    fill(96,64,255);
+    rect( -8, -5, 12, 10);
+    
+    fill(128,128,255);
+    rect(-10,-10, 16,  4);
+    rect(-10,  6, 16,  4);
+    stroke('black');
+    strokeWeight(1);
+    fill(64,64,255);
+    rect(-2, -2, 10, 4);
+
+    // Enemy
+    translate(0,20);
+    
+    noStroke();
+    fill(255,64,96);
+    rect( -8, -5, 12, 10);
+    
+    fill(255,128,128);
+    rect(-10,-10, 16,  4);
+    rect(-10,  6, 16,  4);
+    stroke('black');
+    strokeWeight(1);
+    fill(255,64,64);
+    rect(-2, -2, 10, 4);
+    
+    // dead
+    translate(0,20);
+    
+    noStroke();
+    fill('grey');
+    rect( -8, -5, 12, 10);
+    
+    fill('lightGrey');
+    rect(-10,-10, 16,  4);
+    rect(-10,  6, 16,  4);
+    stroke('black');
+    strokeWeight(1);
+    fill('darkGrey');
+    rect(-2, -2, 10, 4);
+
+    resetMatrix();
+    this.subpixel_scale = pixelDensity();
+    this.sprites = createImage(400*this.subpixel_scale,400*this.subpixel_scale);
+    this.sprites.copy(canvas,0,0,400,400,0,0, 400*this.subpixel_scale, 400*this.subpixel_scale);
+  }
+  draw_sprite(index, position, rotation = 0) {
+    translate(position);
+    rotate(rotation);
+    image(this.sprites, -10, -10, 20, 20,
+          index[0]*20*this.subpixel_scale, index[1]*20*this.subpixel_scale, 20*this.subpixel_scale, 20*this.subpixel_scale);
+    rotate(-rotation);
+    translate(position.copy().mult(-1));
+  }
+  draw_tile_quad(index, quad, position, rotation = 0) {
+    let offset = createVector((!!(quad & 0b001))*10, (!!(quad & 0b010))*10);
+    translate(position);
+    rotate(rotation);
+    image(this.sprites, -10+offset.x, -10+offset.y, 10, 10,
+          (index[0]*20+offset.x)*this.subpixel_scale, (index[1]*20+offset.y)*this.subpixel_scale, 10*this.subpixel_scale, 10*this.subpixel_scale);
+    rotate(-rotation);
+    translate(position.copy().mult(-1));
+  }
+}
+
+/*
+  Parts for drawing game screens
+*/
+
+function draw_menu(world) {
+  textAlign(LEFT);
+  textSize(12);
+  noStroke();
+  fill('white');
+  text("\
+You are a tank.\n\
+Move with wasd or arrowkeys.\n\
+Shoot with space and avoid missiles\n\n\
+Kill all enemy tanks to win\n\n\n\
+DEBUG:\n\
+Press H to view hitboxes\n\
+Press M to view the position hash array\n\n\n\
+Click anywhere to start.\n\n\n\
+Have fun!\
+", 20,50);
+  world.sprites.draw_sprite(PLAYER, createVector(320, 60));
+  world.sprites.draw_sprite(ENEMY, createVector(320, 120));
+  //world.sprites.draw_sprite(OBSTACLE, createVector(320, 150));
+
+}
+
+/*
+  This is the part that loads the world and starts the game.
+*/
+
+var gameWorld;
+var half_width;
+var half_height;
+function setup() {
+  gameWorld = new world();
+  gameWorld.map = [
+    "##                ##",
+    "#                  #",
+    "                    ",
+    "     #       #      ",
+    "  e  #       # e    ",
+    "     #       #      ",
+    "   #####   #####    ",
+    "                    ",
+    "        @           ",
+    "                    ",
+    "                    ",
+    "                    ",
+    "    #          #    ",
+    "    ############    ",
+    "  e      ##         ",
+    "         ##         ",
+    "                    ",
+    "        e       e   ",
+    "#                  #",
+    "##                ##",
+  ];
+  // level dimensions
+  gameWorld.level_width   = gameWorld.map[0].length*20;
+  gameWorld.level_height  = gameWorld.map.length*20;
+  gameWorld.doors = new Set();
+  gameWorld.score = 0;
+  //* = token
+  //> = horizontal monster
+  //^ = vertical monster
+  //a = gate (starts off)
+  //A = gate (starts on)
+  //1 = button toggle
+  //...
+  
+  // background layer (layer 0)
+  /*for (let row = 0; row < 20; row++) {
+    for (let col = 0; col < 20; col++) {
+      switch(gameWorld.map[row][col]) {
+        case '.':
+          new border(gameWorld, createVector(col*20 + 10, row*20 + 10), createVector(0,0));
+          break
+      }
+    }
+  }
+  */
+  
+  // floor layer (layer 1)
+  for (let row = 0; row < gameWorld.map.length; row++) {
+    for (let col = 0; col < gameWorld.map[0].length; col++) {
+      let neighbors = 0;
+      switch(gameWorld.map[row][col]) {
+        case 'O':
+          neighbors = (2<<8)-1;
+          for (let subrow = max(row-1, 0); subrow < min(row+2, gameWorld.map.length); subrow++) {
+            for (let subcol = max(col-1,0); subcol < min(col+2,gameWorld.map[0].length); subcol++) {
+              
+              if (gameWorld.map[subrow][subcol] !== '#' && gameWorld.map[subrow][subcol] !== 'O') {
+                print((3*(subrow-row+1)+(subcol-col+1)));
+                neighbors ^= (1<<(3*(subrow-row+1)+(subcol-col+1)));
+              }
+            }
+          }
+          print(neighbors);
+          new wall(gameWorld, createVector(col*20 + 10, row*20 + 10), 0, neighbors);
+          break;
+        case '#':
+          neighbors = (2<<8)-1;
+          for (let subrow = max(row-1, 0); subrow < min(row+2, gameWorld.map.length); subrow++) {
+            for (let subcol = max(col-1,0); subcol < min(col+2,gameWorld.map[0].length); subcol++) {
+              
+              if (gameWorld.map[subrow][subcol] !== '#' && gameWorld.map[subrow][subcol] !== 'O') {
+                //print((3*(subrow-row+1)+(subcol-col+1)));
+                neighbors ^= (1<<(3*(subrow-row+1)+(subcol-col+1)));
+              }
+            }
+          }
+          //print(neighbors);
+          new wall(gameWorld, createVector(col*20 + 10, row*20 + 10), 0, neighbors);
+          break;
+      }
+    }
+  }
+  
+  // foreground layer (layer 2)
+  for (let row = 0; row < gameWorld.map.length; row++) {
+    for (let col = 0; col < gameWorld.map[0].length; col++) {
+      switch(gameWorld.map[row][col]) {
+        case '@':
+          gameWorld.player = new player(gameWorld, createVector(col*20 + 10, row*20 + 10), QUARTER_PI);
+          break
+        case 'e':
+          let ent = new enemy(gameWorld, createVector(col*20 + 10, row*20 + 10), random(0, TWO_PI));
+          break
+      }
+    }
+  } 
+  
+  /* additional code added to the  game for hosting in website */
+	let sketchGameWidth = document.getElementById("game-container").offsetWidth;
+	let sketchGameHeight = document.getElementById("game-container").offsetHeight;
+    
+	
+	
+	gameWorld.canvas = createCanvas(sketchGameWidth, sketchGameHeight);
+	gameWorld.canvas.parent("game-container"); 
+  
+  //gameWorld.canvas = createCanvas(400, 400);
+  half_width    = width/2;
+  half_height   = height/2;
+  gameWorld.sprites = new spriteSheet(gameWorld.canvas);
+  if (PAUSE_FOR_SPRITESHEET) {
+    gameWorld.state = SPRITES;
+  }
+  else {
+    gameWorld.state = MENU;
+  }
+  gameWorld.endFrame = 0;
+  gameWorld.gravity = 0.1;
+}
 
 // added in the game to set them in website 
 function windowResized() 
@@ -808,166 +1548,62 @@ function windowResized()
   resizeCanvas(sketchGameWidth, sketchGameHeight);
 }			
 
-//Setup function: Creates the canvas, draws custom characters and intializes entities
-function setup() 
-{
-   
-  	/* additional code added to the  game for hosting in website */
-	let sketchGameWidth = document.getElementById("game-container").offsetWidth;
-	let sketchGameHeight = document.getElementById("game-container").offsetHeight;
-    
-	
-	
-	let renderer = createCanvas(sketchGameWidth, sketchGameHeight);
-	renderer.parent("game-container"); 
-  
-  initTilemap(); 
-  
-   bullets = [
-    new bulletObj(player[0].x, player[0].y),
-    new bulletObj(player[0].x, player[0].y),
-    new bulletObj(player[0].x, player[0].y),
-    new bulletObj(player[0].x, player[0].y),
-  ]; // The player can only shoot 4 bullets at a  time.     
-     
-	 
-  
-  
-}
-var gameOver = false;
-var instructions = false;
-function mouseClicked() {
-  // checking where the mouse clicked to start the game
-  var xCor = mouseX;
-  var yCor = mouseY; // check if clicked in the correct box
-  if (xCor > 0 && xCor < 419 && yCor > 0 && yCor < 410 && !instructions) {
-    instructions = true;
-  }
-}
-var r = 135;
-var g = 206;
-var b = 235;
 function draw() {
-  
-  if (!instructions){ // showing the instructions screen
-     background(135, 206, 235);
-    r++;
-    g++;
-    b++;
-    noStroke();
-    fill(255, 255, 0);
-    arc(0, 0, 150, 150, 2 * PI, (1 / 2) * PI);
-    fill(112, 84, 62);
-    beginShape();
-    vertex(0, 325);
-    vertex(400, 325);
-    vertex(400, 400);
-    vertex(0, 400);
-    endShape(CLOSE);
-    fill(r, g, b);
-    textSize(20);
-    text("Welcome to the Game !!!", 100, 125);
-    textSize(15);
-    text("To start playing the game click anywhere on the screen.", 25, 150);
-    text("Use the up arrow key/w to move forward, use the down  ", 25, 175);
-    text(" arrow key/s to move back, use the right arrows/d and ", 25, 200);
 
-    text("left arrows/a to rotate in a given direction. Hit Space Bar  ", 25, 225);
-    text("to kill the enemy tanks, destroy all the enmy tanks to win. ", 15, 250);
-    text("If you get hit by any of the enemy tank bullets, you die.", 25, 275);
-    text("Best of Luck !!!", 150, 325);
+  if (gameWorld.state != SPRITES) {
+    background(32);
   }
-  else if (!gameOver) { // if the game is not over and the plaer has moved on from the instruction screen
-    background(112, 84, 62);
-    for (var i = 0; i < walls.length; i++) {
-      walls[i].draw();
-    }
-    player[0].draw();
-    player[0].move();
-    for (i = 0; i < enemy.length; i++) { // for each enemy execute the state that the enemy is in 
-      enemy[i].states[enemy[i].state].execute(enemy[i]);
-      if (enemy[i].bullet[0].fired) {
-        enemy[i].bullet[0].draw();
+  switch(gameWorld.state) {
+    case SPRITES:
+      if (MOUSE_WAS_PRESSED) {
+        gameWorld.state = MENU;
+        MOUSE_WAS_PRESSED = false;
       }
-      if (enemy[i].state != 3) { // if the enemy is not dead then draw its orginal shape and structure 
-        enemy[i].draw();
-      } else {
-        if (!enemy[i].scored) { // if the enemy has not been scored adn is dead then score it.
-          score += 1;
-          enemy[i].scored = true;
-        }
+      break;
+    case MENU: // main menu
+      draw_menu(gameWorld);
+      if (MOUSE_WAS_PRESSED) {
+        MOUSE_WAS_PRESSED = false;
+        SPACE_WAS_PRESSED = false;
+        gameWorld.state = RUNNING;
       }
-    }
-
-    for (i = 0; i < 4; i++) {
-      if (!bullets[i].fired) { // if the bullet is not fired then check if it can be fired 
-        checkFire();
+      break;
+    case RUNNING: // game running
+    case LOST: //game over
+    case WON: // game won
+      for (let i = 0; i < 300; i++) {
+        fill('white');
+        noStroke();
+      } 
+      gameWorld.process();
+      translate(-max(0, min(gameWorld.player.position.x-half_width, gameWorld.level_width-width)),
+                -max(0, min(gameWorld.player.position.y-half_height, gameWorld.level_height-height)));
+      gameWorld.draw();
+      resetMatrix();
+      strokeWeight(2);
+      textAlign(LEFT);
+      textSize(11);
+      stroke('black');
+      fill('white');
+      //text("Score: " + gameWorld.score.toString() + "/20", 5,395);
+      switch (gameWorld.state) {
+        case RUNNING:
+          break;
+        case LOST:
+          textAlign(CENTER);
+          textSize(30);
+          stroke('black');
+          fill('red')
+          text("YOU LOSE!", 200,210);
+          break;
+        case WON:
+          textAlign(CENTER);
+          textSize(30);
+          stroke('black');
+          fill('white')
+          text("YOU WIN!", 200,210);
+          break;
       }
-      if (bullets[i].fired) { // if the bullet has been fired then draw it 
-        bullets[i].draw();
-      }
-    }
-
-    if (score == 5) { // if the score is equal to 5 then the game i sover
-      gameOver = true;
-    }
-  } else { // if the game is over 
-    background(112, 84, 62); // redraw the the background and the walls
-    for (var i = 0; i < walls.length; i++) {
-      walls[i].draw();
-    }
-    
-    if (player[0].dead) { // if the player has been shot then the player has lost the game
-      if (!player[0].blasted) { // draw the fireworks for the game code taken from the exmaple 
-        if (player[0].blast.step == 0) {
-          player[0].blast.position.set(player[0].x, player[0].y);
-          player[0].blast.target.set(player[0].x, player[0].y - 50);
-          player[0].blast.direction.set(
-            player[0].blast.target.x - player[0].blast.position.x,
-            player[0].blast.target.y - player[0].blast.position.y
-          );
-          var s = random(1, 2) / 100;
-          player[0].blast.direction.mult(s);
-          player[0].blast.step++;
-        } else if (player[0].blast.step === 1) {
-          player[0].blast.draw();
-        } else if (player[0].blast.step === 2) {
-          for (var i = 0; i < player[0].blast.explosions.length; i++) {
-            player[0].blast.explosions[i].draw();
-          }
-          if (player[0].blast.explosions[0].timer <= 0) {
-            player[0].blast.step++;
-          }
-        }
-        if (player[0].blast.step == 3) {
-          player[0].blasted = true;
-        }
-        
-      }
-      for (i = 0; i < enemy.length; i++) { // draw all the enemies in their given state
-        if (enemy[i].state != 3) {
-            enemy[i].draw();
-          enemy[i].state = 0;
-        }
-          enemy[i].states[enemy[i].state].execute(enemy[i]);
-          
-        }
-      textSize(20);
-    player[0].killed(); //kill the player and draw the fire
-    player[0].fire();
-      
-      // stroke(0);
-      fill(136, 8, 8);
-      text("The Enemy tank destroyed you, you lose!!!", 10, 175); // print the losing message
-    }
-    else if (score == 5){ // if the score is 5 then the player has destroyed all the tanks and won the game.
-      player[0].draw();
-      for (i = 0; i < enemy.length; i++) {
-          enemy[i].states[enemy[i].state].execute(enemy[i]);
-      }
-        textSize(25);
-      fill(102, 255, 0);
-        text("You Win !!!", 150, 175); // display winning message
-    }
+      break;
   }
 }
