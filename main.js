@@ -26,6 +26,8 @@ var project_id_loc = {
 	'p5_game3',
 	'p6_game1',
 	'p6_game2',
+	'p8_game1',
+	
 	
 	
 	
@@ -53,6 +55,8 @@ var project_id_loc = {
 	'p5_sketch_3.js',
 	'p6_sketch_1.js',
 	'p6_sketch_2.js',
+	'p8_sketch_1.js',
+	
 	
 	
 	
