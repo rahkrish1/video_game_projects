@@ -15,10 +15,29 @@ let prisms = [];
 const allFaces = [true, true, true, true, true, true];
 const allButTop = [true, true, false, true, true, true];
 
+// added in the game to set them in website 
+function windowResized() 
+{
+  let sketchGameWidth = document.getElementById("game-container").offsetWidth;
+  let sketchGameHeight = document.getElementById("game-container").offsetHeight;
+  resizeCanvas(sketchGameWidth, sketchGameHeight);
+}			
+
+
+
 // setup the game variables
 function setup() {
   noStroke();
-  createCanvas(400, 400);
+  
+  /* additional code added to the  game for hosting in website */
+	let sketchGameWidth = document.getElementById("game-container").offsetWidth;
+	let sketchGameHeight = document.getElementById("game-container").offsetHeight;
+	
+	let renderer = createCanvas(sketchGameWidth, sketchGameHeight);
+	renderer.parent("game-container"); 
+	
+	
+  //createCanvas(400, 400);
   angleMode(DEGREES);
 
   // define prism color arrays

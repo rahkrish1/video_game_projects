@@ -852,9 +852,26 @@
  var light_setting = Z_NORM;
  var color_setting = DEFAULT_COLOR;
  
+// added in the game to set them in website 
+function windowResized() 
+{
+  let sketchGameWidth = document.getElementById("game-container").offsetWidth;
+  let sketchGameHeight = document.getElementById("game-container").offsetHeight;
+  resizeCanvas(sketchGameWidth, sketchGameHeight);
+}			
+
+
+function setup() { 
  
- function setup() {
-     canvas = createCanvas(400, 400);
+    /* additional code added to the  game for hosting in website */
+	
+	let sketchGameWidth = document.getElementById("game-container").offsetWidth;
+	let sketchGameHeight = document.getElementById("game-container").offsetHeight;
+	
+	canvas = createCanvas(sketchGameWidth, sketchGameHeight);
+	canvas.parent("game-container"); 
+	
+    
      frameRate(30);
      angleMode(DEGREES);
      backgroundColour = color(255, 255, 255);
